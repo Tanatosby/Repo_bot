@@ -16,15 +16,15 @@ POWER_BI_URL = (
     "/reports/06dc0ac3-538c-41c5-a036-8051490a55b4"
     "/bbcebd97a0e3fe7a2247?experience=power-bi"
 )
-INPUT_FILE    = "FR_70140526.csv"
+INPUT_FILE    = "posibles_errores.txt"
 EXCEL_GENERAL = "resultados_powerbi.xlsx"
 EXCEL_ANALISIS = "analisis.xlsx"
 LOG_FILE      = f"log_powerbi_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
 
 WAIT_CARGA    = 14   # segundos espera tras seleccionar ID
 WAIT_NRC      = 10   # segundos espera para carga de tabla NRCs
-TEST_MODE     = True
-TEST_IDS      = ["72986227"]  #73333885 sobrescribe CSV en TEST_MODE; [] para usar CSV normal
+TEST_MODE     = False
+TEST_IDS      = ["73333885", "74879114", "73870794", "72693065", "74392079"]  #73333885 sobrescribe CSV en TEST_MODE; [] para usar CSV normal
 BANNER_PERIODO = "202610"               # periodo a proyectar en SVAPROY
 
 
@@ -35,11 +35,19 @@ BANNER_PERIODO = "202610"               # periodo a proyectar en SVAPROY
 def leer_ids(path: str) -> list[str]:
     ids = []
     with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader)
-        for row in reader:
-            if row:
-                ids.append(row[0].strip().strip('"'))
+        if path.endswith(".txt"):
+            # Una línea por ID, sin header
+            for line in f:
+                id_ = line.strip().strip('"')
+                if id_:
+                    ids.append(id_)
+        else:
+            # CSV con header en la primera línea
+            reader = csv.reader(f)
+            next(reader)
+            for row in reader:
+                if row:
+                    ids.append(row[0].strip().strip('"'))
     return ids
 
 
@@ -603,6 +611,7 @@ _EXCLUIR_PREFIJOS = (
     'MINOR',
     'CURSO DE LIBRE CONFIGURACI',  # cubre con/sin tilde: CONFIGURACION / CONFIGURACIÓN
     'LIBRE CONFIGURACI',
+    'CLC',
 )
 
 def es_curso_excluido(nombre: str) -> bool:
@@ -624,7 +633,8 @@ def calcular_proyectar(prereq_str: str, mapa_codigos: dict, cursos_n_set: set) -
     def reemplazar(match):
         codigo = match.group(1)
         nombre = mapa_codigos.get(codigo, '').upper()
-        # Si no está en codigos o no está en cursos_n → cumple (True)
+        if not nombre:
+            return 'False'  # código no existe en el plan → no se puede asumir aprobado
         return 'False' if nombre in cursos_n_set else 'True'
 
     # Reemplazar "CODIGO [N]" o solo "CODIGO" por True/False
@@ -1347,46 +1357,301 @@ def limpiar_slicer_borrador(page, aria_label: str) -> bool:
 
 
 # =============================================================================
-# NRC: verificar existencia de NRCs para cursos no proyectados
+# NRC via Power BI  ==SECCION NO USADA==
+# Reemplazada por buscar_nrc_ssasecq (Banner SSASECQ).
+# Se conserva como referencia.
 # =============================================================================
 
-JS_TIENE_NRC = """
+# JS_TIENE_NRC = """
+# () => {
+#     // Misma estructura que GENERAL: buscar celdas con contenido en el cuerpo de la tabla
+#     const bodyContainer = document.querySelector('.bodyCells');
+#     if (bodyContainer) {
+#         const cells = bodyContainer.querySelectorAll('.cell, .pivotTableCellWrap');
+#         return [...cells].some(el => el.textContent.trim().length > 0);
+#     }
+#     // Fallback: ARIA gridcells
+#     const gridcells = document.querySelectorAll('[role="gridcell"]');
+#     return [...gridcells].some(el => el.textContent.trim().length > 0);
+# }
+# """
+#
+#
+# def verificar_nrc_existe(page) -> bool:
+#     try:
+#         return bool(page.evaluate(JS_TIENE_NRC))
+#     except Exception as e:
+#         print(f"  Error verificando NRC: {e}")
+#         return False
+#
+#
+# def buscar_nrc_cursos(page, cursos_sin_svaproy: list[dict]) -> bool:
+#     """
+#     Navega a 'Reporte de NRCs u Horario', verifica PERIODO una vez (sin re-clic si ya
+#     está marcado) y por cada curso limpia MATERIA/NÚMERO con el borrador antes de filtrar.
+#     Retorna True en cuanto encuentra un NRC (fail fast).
+#     """
+#     print("\n--- REPORTE DE NRCs ---")
+#     navegar_seccion(page, "NRCs")
+#
+#     # PERIODO: solo hace clic si no está ya seleccionado
+#     if not verificar_slicer_seleccionado(page, "PERIODO", BANNER_PERIODO):
+#         print(f"  No se pudo confirmar PERIODO {BANNER_PERIODO}")
+#         return False
+#     time.sleep(2)
+#
+#     for item in cursos_sin_svaproy:
+#         codigo = item.get("codigo", "")
+#         nombre = item.get("nombre", "")
+#         if not codigo or len(codigo) < 6:
+#             print(f"  {nombre}: código inválido '{codigo}', omitido")
+#             continue
+#
+#         materia = codigo[:-5].strip()
+#         numero  = codigo[-5:]
+#         print(f"  NRC: {codigo} ({nombre}) | materia={materia} numero={numero}")
+#
+#         limpiar_slicer_borrador(page, "MATERIA")
+#         if not seleccionar_en_slicer(page, "MATERIA", materia):
+#             print(f"  No se pudo seleccionar MATERIA '{materia}'")
+#             continue
+#
+#         limpiar_slicer_borrador(page, "NÚMERO DE CURSO")
+#         if not seleccionar_en_slicer(page, "NÚMERO DE CURSO", numero):
+#             print(f"  No se pudo seleccionar NÚMERO DE CURSO '{numero}'")
+#             continue
+#
+#         print(f"  Esperando {WAIT_NRC}s para carga NRC...")
+#         time.sleep(WAIT_NRC)
+#
+#         if verificar_nrc_existe(page):
+#             print(f"  *** NRC ENCONTRADO: {codigo} → ERROR DEL SISTEMA ***")
+#             return True
+#         print(f"  Sin NRC para {codigo}")
+#
+#     return False
+
+
+# =============================================================================
+# SSASECQ: buscar NRC en Banner (reemplaza sección NRC de Power BI)
+# =============================================================================
+
+JS_DEBUG_SSASECQ = """
 () => {
-    // Misma estructura que GENERAL: buscar celdas con contenido en el cuerpo de la tabla
-    const bodyContainer = document.querySelector('.bodyCells');
-    if (bodyContainer) {
-        const cells = bodyContainer.querySelectorAll('.cell, .pivotTableCellWrap');
-        return [...cells].some(el => el.textContent.trim().length > 0);
+    const result = { inputs: [], selects: [] };
+
+    // Todos los inputs visibles (excluye hidden)
+    for (const inp of document.querySelectorAll('input:not([type="hidden"])')) {
+        let label = '';
+        if (inp.id) {
+            const lbl = document.querySelector('label[for="' + inp.id + '"]');
+            if (lbl) label = lbl.textContent.trim();
+        }
+        if (!label) {
+            // Subir al contenedor más cercano y buscar label/span de texto
+            const parent = inp.closest('td, li, div');
+            if (parent) {
+                const labelEl = parent.querySelector('label, span');
+                if (labelEl) label = labelEl.textContent.trim().slice(0, 60);
+            }
+        }
+        result.inputs.push({
+            id:          inp.id || '',
+            name:        inp.name || '',
+            type:        inp.type || 'text',
+            label:       label.slice(0, 60),
+            placeholder: inp.placeholder || '',
+            value:       inp.value || '',
+            readOnly:    inp.readOnly
+        });
     }
-    // Fallback: ARIA gridcells
-    const gridcells = document.querySelectorAll('[role="gridcell"]');
-    return [...gridcells].some(el => el.textContent.trim().length > 0);
+
+    // Todos los selects — especialmente "Agregar otro campo"
+    for (const sel of document.querySelectorAll('select')) {
+        let label = '';
+        if (sel.id) {
+            const lbl = document.querySelector('label[for="' + sel.id + '"]');
+            if (lbl) label = lbl.textContent.trim();
+        }
+        // Opción 0 suele ser "Agregar otro campo..."
+        const options = [...sel.options].map(o => ({ value: o.value, text: o.text.trim() }));
+        result.selects.push({
+            id:           sel.id || '',
+            name:         sel.name || '',
+            label:        label,
+            currentValue: sel.value,
+            options:      options
+        });
+    }
+
+    return result;
 }
 """
 
 
-def verificar_nrc_existe(page) -> bool:
+def _ssasecq_frame(banner_page):
+    """Espera hasta 15 s al iframe del formulario SSASECQ en Banner INB."""
+    for _ in range(30):
+        for fr in banner_page.frames:
+            if fr.url == banner_page.url:
+                continue
+            try:
+                if fr.locator('input[type="text"]').count() >= 1:
+                    print(f"  Frame SSASECQ detectado: {fr.url[:80]}")
+                    return fr
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return None
+
+
+def navegar_ssasecq(banner_page) -> bool:
+    """Abre el buscador lateral de Banner, escribe SSASECQ y entra a la página."""
     try:
-        return bool(page.evaluate(JS_TIENE_NRC))
+        # 1. Clic en el botón "Buscar" del sidebar
+        banner_page.locator("#sidebarSearchLink").click()
+        banner_page.wait_for_selector("#searchMenu", state="visible", timeout=8000)
+        time.sleep(0.8)
+
+        # 2. Escribir SSASECQ en el input de búsqueda
+        search_input = banner_page.locator("input#search")
+        search_input.wait_for(state="visible", timeout=5000)
+        search_input.click()
+        time.sleep(0.3)
+        search_input.fill("SSASECQ")
+        time.sleep(2)
+
+        # 3. Clic en el primer resultado
+        resultado = banner_page.locator("#vsearchResultId li").first
+        resultado.wait_for(state="visible", timeout=8000)
+        print(f"  Banner resultado SSASECQ: {resultado.inner_text()[:80]}")
+        resultado.click()
+
+        time.sleep(4)  # SSASECQ inicializa su formulario
+        print(f"  Banner URL tras SSASECQ: {banner_page.url}")
+        return True
     except Exception as e:
-        print(f"  Error verificando NRC: {e}")
+        print(f"  Error navegando a SSASECQ: {e}")
         return False
 
 
-def buscar_nrc_cursos(page, cursos_sin_svaproy: list[dict]) -> bool:
-    """
-    Navega a 'Reporte de NRCs u Horario', verifica PERIODO una vez (sin re-clic si ya
-    está marcado) y por cada curso limpia MATERIA/NÚMERO con el borrador antes de filtrar.
-    Retorna True en cuanto encuentra un NRC (fail fast).
-    """
-    print("\n--- REPORTE DE NRCs ---")
-    navegar_seccion(page, "NRCs")
+def debug_ssasecq(banner_page):
+    """Escanea y loguea inputs + opciones de 'Agregar otro campo' en SSASECQ."""
+    form = _ssasecq_frame(banner_page)
+    ctx = form if form else banner_page
 
-    # PERIODO: solo hace clic si no está ya seleccionado
-    if not verificar_slicer_seleccionado(page, "PERIODO", BANNER_PERIODO):
-        print(f"  No se pudo confirmar PERIODO {BANNER_PERIODO}")
+    data = ctx.evaluate(JS_DEBUG_SSASECQ)
+    print("\n=== DEBUG SSASECQ ===")
+    print(f"  Inputs ({len(data['inputs'])}):")
+    for inp in data['inputs']:
+        ro = " [RO]" if inp.get('readOnly') else ""
+        print(f"    [{inp['type']}] id='{inp['id']}' name='{inp['name']}'"
+              f" label='{inp['label']}' placeholder='{inp['placeholder']}'"
+              f" val='{inp['value']}'{ro}")
+    print(f"\n  Selects ({len(data['selects'])}):")
+    for sel in data['selects']:
+        print(f"    id='{sel['id']}' name='{sel['name']}' label='{sel['label']}'"
+              f" val-actual='{sel['currentValue']}'")
+        for opt in sel['options']:
+            print(f"      option  value='{opt['value']}'  text='{opt['text']}'")
+    print("=== FIN DEBUG SSASECQ ===\n")
+    return data
+
+
+JS_AGREGAR_CAMPO_SSASECQ = """
+(fieldValue) => {
+    // El select "Agregar otro campo" tiene options[0].value === '' (ningún otro select tiene esto)
+    const sel = [...document.querySelectorAll('select')].find(
+        s => s.options.length > 0 && s.options[0].value === ''
+    );
+    if (!sel) return 'no_select';
+    sel.value = fieldValue;
+    sel.dispatchEvent(new Event('change', {bubbles: true}));
+    return 'ok';
+}
+"""
+
+JS_LLENAR_ULTIMO_FILTRO_SSASECQ = """
+(valor) => {
+    // Los inputs de filtro tienen id = framesNN (ej. frames48, frames50, ...)
+    const filterInputs = [...document.querySelectorAll('input[type="text"]:not([readonly])')].filter(
+        i => i.id && /^frames\\d+$/.test(i.id)
+    );
+    if (!filterInputs.length) return null;
+    const last = filterInputs[filterInputs.length - 1];
+    last.value = valor;
+    last.dispatchEvent(new Event('input',  {bubbles: true}));
+    last.dispatchEvent(new Event('change', {bubbles: true}));
+    return last.id;
+}
+"""
+
+JS_OPERADOR_ULTIMO_SSASECQ = """
+(operatorValue) => {
+    // Los selects de operador son identificables por tener tanto '=' como '#LIKE' como opciones.
+    // Excluimos el select "Agregar otro campo" (options[0].value === '').
+    const opSels = [...document.querySelectorAll('select')].filter(s =>
+        s.options[0] && s.options[0].value !== '' &&
+        [...s.options].some(o => o.value === '=') &&
+        [...s.options].some(o => o.value === '#LIKE')
+    );
+    if (!opSels.length) return false;
+    const last = opSels[opSels.length - 1];
+    last.value = operatorValue;
+    last.dispatchEvent(new Event('change', {bubbles: true}));
+    return true;
+}
+"""
+
+JS_FILL_PERIODO_SSASECQ = """
+(periodo) => {
+    // Los IDs de filtro son dinámicos (frames24, frames48, etc. según la sesión).
+    // El primer input con id=framesNN siempre corresponde a Periodo.
+    const filterInputs = [...document.querySelectorAll('input[type="text"]:not([readonly])')].filter(
+        i => i.id && /^frames\\d+$/.test(i.id)
+    );
+    if (!filterInputs.length) return null;
+    const inp = filterInputs[0];
+    inp.value = periodo;
+    inp.dispatchEvent(new Event('input',  {bubbles: true}));
+    inp.dispatchEvent(new Event('change', {bubbles: true}));
+    return inp.id;
+}
+"""
+
+JS_TIENE_RESULTADOS_SSASECQ = """
+() => {
+    // Check 1: paginación — "Registro N de X" con X > 0.
+    // SHIFT+F1 export está deshabilitado en SSASECQ; se lee directamente el DOM.
+    const allText = document.body.innerText || '';
+    const m = allText.match(/Registro\\s+\\d+\\s+de\\s+(\\d+)/);
+    if (m) {
+        const total = parseInt(m[1]);
+        return { tiene: total > 0, metodo: 'paginacion', total };
+    }
+    // Check 2: ssbsectMaxEnrl != '' ('' = sin resultado cargado; '0' = sección con cupo 0 = sí existe)
+    const maxEnrl = document.querySelector('input[name="ssbsectMaxEnrl"]');
+    if (maxEnrl && maxEnrl.value !== '') {
+        return { tiene: true, metodo: 'maxEnrl', val: maxEnrl.value };
+    }
+    return { tiene: false, metodo: 'vacio' };
+}
+"""
+
+
+def buscar_nrc_ssasecq(banner_page, cursos_sin_svaproy: list[dict], periodo: str) -> bool:
+    """
+    Busca NRCs en SSASECQ para los cursos sin SVAPROY.
+    Por cada curso: Limpiar todo → Periodo → Agregar Materia (=) → Agregar Curso (=) → F8 → verificar.
+    Fail-fast: retorna True en cuanto encuentra un NRC.
+    """
+    print("\n--- SSASECQ NRC ---")
+    if not navegar_ssasecq(banner_page):
+        print("  No se pudo navegar a SSASECQ")
         return False
-    time.sleep(2)   # espera breve solo para estabilidad, no recarga completa
+
+    form = _ssasecq_frame(banner_page)
+    ctx  = form if form else banner_page
 
     for item in cursos_sin_svaproy:
         codigo = item.get("codigo", "")
@@ -1395,27 +1660,55 @@ def buscar_nrc_cursos(page, cursos_sin_svaproy: list[dict]) -> bool:
             print(f"  {nombre}: código inválido '{codigo}', omitido")
             continue
 
-        # "INVE01010" → materia="INVE", numero="01010"
-        materia = codigo[:-5].strip()
-        numero  = codigo[-5:]
-        print(f"  NRC: {codigo} ({nombre}) | materia={materia} numero={numero}")
+        materia = codigo[:-5].strip()   # "INVE01010" → "INVE"
+        numero  = codigo[-5:]           # "INVE01010" → "01010"
+        print(f"  SSASECQ: {codigo} ({nombre}) | materia={materia} numero={numero}")
 
-        # Limpiar con borrador y seleccionar MATERIA
-        limpiar_slicer_borrador(page, "MATERIA")
-        if not seleccionar_en_slicer(page, "MATERIA", materia):
-            print(f"  No se pudo seleccionar MATERIA '{materia}'")
+        # 1. Limpiar todos los filtros — hay 2 botones "Limpiar todo", .first alcanza
+        try:
+            ctx.locator('button:has-text("Limpiar todo")').first.click(timeout=3000)
+            time.sleep(1)
+        except Exception:
+            print("  'Limpiar todo' no encontrado, continuando sin limpiar")
+
+        # 2. Llenar Periodo — el primer input framesNN siempre es Periodo (ID dinámico por sesión)
+        inp_id = ctx.evaluate(JS_FILL_PERIODO_SSASECQ, periodo)
+        if not inp_id:
+            print(f"  No se encontró input de Periodo (framesNN)")
             continue
+        print(f"  Periodo='{periodo}' en {inp_id}")
+        time.sleep(0.3)
 
-        # Limpiar con borrador y seleccionar NÚMERO DE CURSO
-        limpiar_slicer_borrador(page, "NÚMERO DE CURSO")
-        if not seleccionar_en_slicer(page, "NÚMERO DE CURSO", numero):
-            print(f"  No se pudo seleccionar NÚMERO DE CURSO '{numero}'")
-            continue
+        # 3. Agregar campo Materia + operador '=' + valor
+        ok = ctx.evaluate(JS_AGREGAR_CAMPO_SSASECQ, 'SSBSECT_SUBJ_CODE')
+        print(f"  Agregar Materia: {ok}")
+        time.sleep(1.2)
+        ctx.evaluate(JS_OPERADOR_ULTIMO_SSASECQ, '=')
+        time.sleep(0.3)
+        inp_id = ctx.evaluate(JS_LLENAR_ULTIMO_FILTRO_SSASECQ, materia)
+        print(f"  Materia='{materia}' → input id='{inp_id}'")
+        time.sleep(0.5)
 
-        print(f"  Esperando {WAIT_NRC}s para carga NRC...")
+        # 4. Agregar campo Curso + operador '=' + valor
+        ok = ctx.evaluate(JS_AGREGAR_CAMPO_SSASECQ, 'SSBSECT_CRSE_NUMB')
+        print(f"  Agregar Curso: {ok}")
+        time.sleep(1.2)
+        ctx.evaluate(JS_OPERADOR_ULTIMO_SSASECQ, '=')
+        time.sleep(0.3)
+        inp_id = ctx.evaluate(JS_LLENAR_ULTIMO_FILTRO_SSASECQ, numero)
+        print(f"  Curso='{numero}' → input id='{inp_id}'")
+        time.sleep(0.5)
+
+        # 5. Ejecutar query con F8 (enviado desde banner_page para asegurar que llegue al frame)
+        print(f"  Ejecutando F8...")
+        banner_page.keyboard.press("F8")
         time.sleep(WAIT_NRC)
 
-        if verificar_nrc_existe(page):
+        # 6. Verificar si hay resultados
+        resultado = ctx.evaluate(JS_TIENE_RESULTADOS_SSASECQ)
+        print(f"  Resultado SSASECQ: {resultado}")
+
+        if resultado.get('tiene'):
             print(f"  *** NRC ENCONTRADO: {codigo} → ERROR DEL SISTEMA ***")
             return True
         print(f"  Sin NRC para {codigo}")
@@ -1509,28 +1802,39 @@ def run():
         input("\n>>> Inicia sesion y presiona ENTER <<<\n")
         time.sleep(8)
 
-        # Abrir Banner y navegar a SVAPROY
-        banner_page = context.new_page()
-        print("\nAbriendo Banner en pestaña nueva...")
-        banner_page.goto(BANNER_URL, wait_until="domcontentloaded", timeout=30000)
-        time.sleep(3)
-        print(f"  Banner URL: {banner_page.url} | Titulo: {banner_page.title()}")
-
-        print("\nNavegando a SVAPROY...")
-        if not navegar_svaproy(banner_page):
-            print("  ADVERTENCIA: no se pudo abrir SVAPROY, revisa manualmente.")
-            input("\n>>> Revisa Banner y presiona ENTER para continuar <<<\n")
-
         # Volver foco a Power BI
         page.bring_to_front()
 
         # Ir a GENERAL al inicio
         navegar_seccion(page, "GENERAL")
 
+        banner_page = None   # se crea/recrea por cada alumno
+
         for i, student_id in enumerate(ids, 1):
             print(f"\n{'='*60}")
             print(f"[{i}/{len(ids)}] ALUMNO: {student_id}")
             print('='*60)
+
+            # Cerrar Banner anterior y abrir pestaña nueva
+            if banner_page is not None:
+                try:
+                    banner_page.close()
+                    print("  Banner anterior cerrado")
+                except Exception:
+                    pass
+
+            banner_page = context.new_page()
+            print("\nAbriendo Banner en pestaña nueva...")
+            banner_page.goto(BANNER_URL, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(3)
+            print(f"  Banner URL: {banner_page.url} | Titulo: {banner_page.title()}")
+
+            print("\nNavegando a SVAPROY...")
+            if not navegar_svaproy(banner_page):
+                print("  ADVERTENCIA: no se pudo abrir SVAPROY, revisa manualmente.")
+                input("\n>>> Revisa Banner y presiona ENTER para continuar <<<\n")
+
+            page.bring_to_front()
 
             programa_code = None
 
@@ -1679,7 +1983,7 @@ def run():
             # PASO 5: NRC — verificar si cursos sin SVAPROY tienen NRC disponible
             # ------------------------------------------------------------------
             if cursos_sin_svaproy:
-                error_sistema = buscar_nrc_cursos(page, cursos_sin_svaproy)
+                error_sistema = buscar_nrc_ssasecq(banner_page, cursos_sin_svaproy, BANNER_PERIODO)
                 log(f"[{i}] NRC revisados: {len(cursos_sin_svaproy)} cursos", log_file)
             else:
                 error_sistema = False

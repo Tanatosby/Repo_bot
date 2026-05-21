@@ -164,6 +164,68 @@ python powerbi_bot.py
 
 ---
 
+## BUG ACTIVO — Degradación de sesión Power BI (~alumno 46-48) → fallo en cascada
+
+### Síntoma
+Después de procesar ~46-48 alumnos seguidos, Power BI deja de responder a clics en secciones, aunque el elemento sea visible y estable:
+
+```
+No se encontro seccion 'GENERAL': Locator.click: Timeout 30000ms exceeded.
+  - locator resolved to <span title="GENERAL" ...>GENERAL</span>
+  - element is visible, enabled and stable
+  - done scrolling
+  - performing click action    ← el clic se ejecuta pero Power BI no reacciona
+```
+
+Inmediatamente el mismo error en `'Reporte de Planes de Estudio'` y `'CURSOS PRINCIPALES'`.
+
+### Fallo en cascada
+Una vez que la sesión se degrada, **todos los alumnos siguientes fallan** porque la página quedó atascada en CURSOS PRINCIPALES (que tiene solo el slicer `'Programa Académico'`), no en GENERAL:
+
+```
+Toggle 1 abrió: ['Programa Académico'] (buscaba: 'ID')
+No se pudo abrir slicer 'ID'
+[51] ID NO ENCONTRADO EN SLICER: 60514713
+[52] ID NO ENCONTRADO EN SLICER: 72681800
+... (todos los siguientes hasta KeyboardInterrupt)
+```
+
+### Causa raíz
+Power BI acumula estado en la sesión del navegador (memoria Angular, suscripciones de visual). Después de ~46 interacciones pesadas (scroll virtualizado + múltiples cambios de sección + slicers), el framework Angular/Power BI se "atasa" y los clics llegan al DOM pero el event handler ya no responde. El bot no tiene recuperación ante este estado, por lo que el error se propaga a todos los alumnos siguientes.
+
+### Fixes a implementar
+
+- **Fix 1 — Reload automático tras fallo de sección** (más urgente):
+  En `navegar_seccion`, si el clic falla por timeout, hacer `page.reload(wait_until='networkidle')` + re-navegar al URL de Power BI en vez de lanzar excepción. Así se reinicia el contexto Angular.
+
+- **Fix 2 — Reload preventivo cada N alumnos**:
+  Cada ~40 alumnos (antes de que la sesión se degrade), recargar la página de Power BI y esperar que vuelva a estar lista. Esto previene el fallo antes de que ocurra.
+  ```python
+  if i > 0 and i % 40 == 0:
+      log(f"Recargando Power BI preventivamente (cada 40 alumnos)...")
+      page.reload(wait_until='networkidle')
+      time.sleep(WAIT_CARGA)
+  ```
+
+- **Fix 3 — Contador de fallos consecutivos + reload**:
+  Si se acumulan ≥3 "ID NO ENCONTRADO EN SLICER" seguidos, asumir que la sesión está degradada y recargar la página antes de continuar:
+  ```python
+  fallos_consecutivos += 1
+  if fallos_consecutivos >= 3:
+      page.reload(wait_until='networkidle')
+      fallos_consecutivos = 0
+  ```
+
+- **Fix 4 — Reanudación desde último DNI procesado**:
+  El bot lee los IDs de `encuesta_errores.xlsx` columna DNI. Si ya existe `analisis_total.xlsx`, leer los IDs ya procesados y saltarlos al inicio, para poder retomar tras un corte sin reprocesar.
+
+### Reanudación manual actual (mientras no esté Fix 4)
+1. Ver el último `[N] ERROR_SISTEMA: ...` en el log.
+2. Abrir `posibles_errores.txt` y comentar/borrar los primeros N IDs.
+3. Volver a correr el bot.
+
+---
+
 ## BUG PENDIENTE — Sección NRC no encuentra slicers (analizar mañana)
 
 ### Síntoma
